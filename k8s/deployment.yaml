@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vle7-web
+  namespace: default
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: vle7-web
+  template:
+    metadata:
+      labels:
+        app: vle7-web
+    spec:
+      containers:
+      - name: vle7-web
+        image: nginx:alpine
+        ports:
+        - containerPort: 80
