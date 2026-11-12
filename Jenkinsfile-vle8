@@ -1,0 +1,81 @@
+pipeline {
+    agent any
+
+    environment {
+        IMAGE = "vle8-demo"
+        KUBECONFIG = "/var/jenkins_home/.kube/config"
+        DOCKERHUB = credentials('dockerhub-creds')
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Build Blue and Green') {
+            steps {
+                sh '''
+                    docker build -t $DOCKERHUB_USR/$IMAGE:blue vle8/blue
+                    docker build -t $DOCKERHUB_USR/$IMAGE:green vle8/green
+                '''
+            }
+        }
+
+        stage('Push Images') {
+            steps {
+                sh '''
+                    echo "$DOCKERHUB_PSW" | docker login -u "$DOCKERHUB_USR" --password-stdin
+                    docker push $DOCKERHUB_USR/$IMAGE:blue
+                    docker push $DOCKERHUB_USR/$IMAGE:green
+                    docker logout
+                '''
+            }
+        }
+
+        stage('Deploy Blue and Green') {
+            steps {
+                sh '''
+                    kubectl apply -f vle8/blue-deployment.yaml
+                    kubectl apply -f vle8/green-deployment.yaml
+                    kubectl apply -f vle8/service.yaml
+
+                    kubectl rollout status deployment/vle8-blue --timeout=120s
+                    kubectl rollout status deployment/vle8-green --timeout=120s
+                '''
+            }
+        }
+
+        stage('Switch Traffic to Green') {
+            steps {
+                sh '''
+                    kubectl patch service vle8-service \
+                      -p '{"spec":{"selector":{"app":"vle8","version":"green"}}}'
+
+                    kubectl get service vle8-service
+                    kubectl get pods -l app=vle8
+                '''
+            }
+        }
+
+        stage('Verify Green') {
+            steps {
+                sh '''
+                    kubectl rollout status deployment/vle8-green --timeout=120s
+                    kubectl get deployments
+                    kubectl get pods -l app=vle8
+                '''
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'VLE 8 Blue-Green deployment completed successfully!'
+        }
+        failure {
+            echo 'VLE 8 deployment failed. Check the logs and retain the previous active environment.'
+        }
+    }
+}
